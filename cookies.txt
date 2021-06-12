@@ -1,0 +1,5 @@
+tinkercad.com	TRUE	/	FALSE	1638864000	LSES	C66265B3-F59C-44F9-A242-E5F518B7CE40
+
+# Interesting further cookies to consider
+# USE_NEW_API_READER_BACKEND=false; USE_NEW_CSG_HOST_BACKEND=false
+# _tcad_session_colab=bfd8920b25086efacd00e6c3d6a4beb6; _circuits_session_colab=bfd8920b25086efacd00e6c3d6a4beb6; csrf-token=ef9a1ae6978e3d19c35c254f717cd0d1
