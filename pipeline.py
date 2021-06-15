@@ -57,7 +57,7 @@ if not WGET_AT:
 VERSION = '20210524.01'
 USER_AGENT = 'Archiveteam (https://wiki.archiveteam.org/; communicate at https://webirc.hackint.org/#ircs://irc.hackint.org/#tinkerhad)'
 #USER_AGENT = 'Do not use this in production'
-TRACKER_ID = 'tinkercad'
+TRACKER_ID = 'wikidot'
 TRACKER_HOST = 'legacy-api.arpa.li'
 MULTI_ITEM_SIZE = 1
 
@@ -185,7 +185,7 @@ class WgetArgs(object):
             '--page-requisites',
             '--timeout', '30',
             '--tries', 'inf',
-            '--domains', 'tinkercad.com',
+            '--domains', 'voat.co',
             '--span-hosts',
             '--waitretry', '30',
             '--warc-file', ItemInterpolation('%(item_dir)s/%(warc_file_base)s'),
@@ -203,17 +203,9 @@ class WgetArgs(object):
             wget_args.extend(['--warc-header', 'x-wget-at-project-item-name: '+item_name])
             wget_args.append('item-name://' + item_name)
             item_type, item_value = item_name.split(':', 1)
-            if item_type == 'user':
-                assert not '-' in item_value
-                wget_args.extend(['--warc-header', 'tinkercad-user: ' + item_value])
-                wget_args.append(f'https://www.tinkercad.com/users/{item_value}')
-            elif item_type == 'submission':
-                 wget_args.extend(['--warc-header', 'tinkercad-submission: ' + item_value])
-                 wget_args.append(f'https://www.tinkercad.com/things/{item_value}')
-            elif item_type == 'asset':
-                assert item_value.startswith('http')
-                wget_args.extend(['--warc-header', 'tinkercad-asset: ' + item_value])
-                wget_args.append(item_value)
+            if item_type == 'wiki':
+                wget_args.extend(['--warc-header', 'wikidot-wiki: ' + item_value])
+                wget_args.append(f'http://{item_value}.wikidot.com/')
             else:
                 raise ValueError('item_type not supported.')
 
