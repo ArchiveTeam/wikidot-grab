@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 import string
+import json
 
 import seesaw
 from seesaw.externalprocess import WgetDownload
@@ -196,7 +197,14 @@ class WgetArgs(object):
         ]
         
         item_names = item['item_name'].split('\0')
-        item['item_name_newline'] = item['item_name'].replace('\0', '\n')
+        item['item_name_newline'] = item['item_name'].replace('\0', '\n') # TODO is it safe to remove this?
+        start_urls = []
+        item_names_table = []
+        
+        # Point of this function is to keep these together
+        def set_start_url(item_type, item_value, start_url):
+            start_urls.append(start_url)
+            item_names_table.append([item_type, item_value])
 
         item_names_to_submit = item_names.copy()
         for item_name in item_names:
@@ -205,11 +213,16 @@ class WgetArgs(object):
             item_type, item_value = item_name.split(':', 1)
             if item_type == 'wiki':
                 wget_args.extend(['--warc-header', 'wikidot-wiki: ' + item_value])
-                wget_args.append(f'http://{item_value}.wikidot.com/')
+                wget_args.append(f'http://{item_value}/')
+                set_start_url(item_type, item_value, f'http://{item_value}/')
             else:
                 raise ValueError('item_type not supported.')
 
             item['item_name'] = '\0'.join(item_names_to_submit)
+            
+            # Feels like about half of writing a grab script is fighting Seesaw and Lua rather than working on the site
+            item['start_urls'] = json.dumps(start_urls)
+            item['item_names_table'] = json.dumps(item_names_table)
 
         if 'bind_address' in globals():
             wget_args.extend(['--bind-address', globals()['bind_address']])
@@ -246,6 +259,8 @@ pipeline = Pipeline(
             'item_dir': ItemValue('item_dir'),
             'warc_file_base': ItemValue('warc_file_base'),
             'item_name_newline': ItemValue('item_name_newline'),
+            'start_urls': ItemValue('start_urls'),
+            'item_names_table': ItemValue('item_names_table')
         }
     ),
     PrepareStatsForTracker(

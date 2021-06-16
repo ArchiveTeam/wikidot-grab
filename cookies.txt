@@ -1,4 +1,4 @@
-.wikidot.com	TRUE	/	FALSE	1638864000	wikidot_token7	6304e75ff709a523cb374c47258889e6
+#.wikidot.com	TRUE	/	FALSE	1638864000	wikidot_token7	6304e75ff709a523cb374c47258889e6
 
 # Interesting further cookies to consider
 # USE_NEW_API_READER_BACKEND=false; USE_NEW_CSG_HOST_BACKEND=false

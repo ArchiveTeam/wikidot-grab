@@ -7,6 +7,8 @@ local http = require("socket.http")
 JSON = assert(loadfile "JSON.lua")()
 
 local item_name_newline = os.getenv("item_name_newline")
+local start_urls = JSON:decode(os.getenv("start_urls"))
+local items_table = JSON:decode(os.getenv("item_names_table"))
 local item_dir = os.getenv("item_dir")
 local warc_file_base = os.getenv("warc_file_base")
 
@@ -21,10 +23,13 @@ discovered_items = {}
 local last_main_site_time = 0
 local current_item_type = nil
 local current_item_value = nil
+local next_start_url_index = 1
 
 local callbackIndex = 0
 local callbackOriginParmas = {}
 local callbackOriginatingPages = {}
+
+local targeted_regex_prefix = nil
 
 io.stdout:setvbuf("no") -- So prints are not buffered - http://lua.2524044.n2.nabble.com/print-stdout-and-flush-td6406981.html
 
@@ -42,14 +47,29 @@ print_debug = function(a)
 end
 print_debug("This grab script is running in debug mode. You should not see this in production.")
 
-set_new_item = function(url)
+local start_urls_inverted = {}
+for _, v in pairs(start_urls) do
+  start_urls_inverted[v] = true
+end
 
-  local wiki = string.match(url, "^https?://([^%./]+)%.wikidot%.com/") or string.match(url, "^https?://([^%./]+)%.wikidot%.com$")
-  if wiki then
-    current_item_type = "wiki"
-    current_item_value = wiki
-    return
+set_new_item = function(url)
+  if url == start_urls[next_start_url_index] then
+    current_item_type = items_table[next_start_url_index][1]
+    current_item_value = items_table[next_start_url_index][2]
+    next_start_url_index = next_start_url_index + 1
+    print_debug("Setting CIT to " .. current_item_type)
+    print_debug("Setting CIV to " .. current_item_value)
+    
+    if current_item_type == "wiki" then
+      targeted_regex_prefix = "^https?://" .. current_item_value:gsub("%-", "%%-"):gsub("%.", "%%.") -- Weird stuff is to escape the regex
+      print_debug("TRP is " .. targeted_regex_prefix)
+      assert(not string.match(current_item_value, "[^a-z0-9%-%_%.]"))
+    else
+      targeted_regex_prefix = nil -- TODO for users
+    end
   end
+  assert(current_item_type)
+  assert(current_item_value)
 end
 
 discover_item = function(item_type, item_name)
@@ -95,12 +115,16 @@ read_file = function(file)
 end
 
 is_on_targeted = function(url)
-  return string.match(url, "^https?://[^/%.]+%.wikidot%.com/") or string.match(url, "^https?://[^/%.]+%.wikidot%.com$")
+  return string.match(url, targeted_regex_prefix .. "/") or string.match(url, targeted_regex_prefix .. "$")
 end
 
 allowed = function(url, parenturl)
   assert(parenturl ~= nil)
 
+  if start_urls_inverted[url] then
+    return false
+  end
+  
   local tested = {}
   for s in string.gmatch(url, "([^/]+)") do
     if tested[s] == nil then
@@ -134,7 +158,7 @@ allowed = function(url, parenturl)
     return false
   end
   
-  local wiki = string.match(url, "^https?://([^%./]+)%.wikidot%.com/") or string.match(url, "^https?://([^%./]+)%.wikidot%.com$")
+  local wiki = string.match(url, "^https?://([^%./]+%.wikidot%.com)/") or string.match(url, "^https?://([^%./]+%.wikidot%.com)$")
   if wiki and wiki ~= current_item_value then
     discover_item("wiki", wiki)
     return false
@@ -156,7 +180,7 @@ allowed = function(url, parenturl)
     return false
   end
   
-  if string.match(url, "^https?://([^%./]+)%.wikidot%.com/forum:new%-thread/") then
+  if string.match(url, targeted_regex_prefix .. "/forum:new%-thread/") then
     return false
   end
   
@@ -188,14 +212,6 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
   local html = nil
 
   downloaded[url] = true
-
-  local function absolute(url, newurl)
-    if string.match(url, "^https?://api%-reader%.tinkercad%.com/users/([^/%?#%-]+)$") then
-      return urlparse.absolute(url, "/api" .. newurl)
-    else
-      return urlparse.absolute(url, newurl)
-    end
-  end
 
   local function check(urla, force)
     assert(not force or force == true) -- Don't accidentally put something else for force
@@ -233,23 +249,23 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     elseif string.match(newurl, "^\\/") then
       checknewurl(string.gsub(newurl, "\\", ""))
     elseif string.match(newurl, "^//") then
-      check(absolute(url, newurl))
+      check(urlparse.absolute(url, newurl))
     elseif string.match(newurl, "^/") then
-      check(absolute(url, newurl))
+      check(urlparse.absolute(url, newurl))
     elseif string.match(newurl, "^%.%./") then
       if string.match(url, "^https?://[^/]+/[^/]+/") then
-        check(absolute(url, newurl))
+        check(urlparse.absolute(url, newurl))
       else
         checknewurl(string.match(newurl, "^%.%.(/.+)$"))
       end
     elseif string.match(newurl, "^%./") then
-      check(absolute(url, newurl))
+      check(urlparse.absolute(url, newurl))
     end
   end
 
   local function checknewshorturl(newurl)
     if string.match(newurl, "^%?") then
-      check(absolute(url, newurl))
+      check(urlparse.absolute(url, newurl))
     elseif not (string.match(newurl, "^https?:\\?/\\?//?/?")
       or string.match(newurl, "^[/\\]")
       or string.match(newurl, "^%./")
@@ -259,7 +275,7 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
       or string.match(newurl, "^android%-app:")
       or string.match(newurl, "^ios%-app:")
       or string.match(newurl, "^%${")) then
-      check(absolute(url, "/" .. newurl))
+      check(urlparse.absolute(url, "/" .. newurl))
     end
   end
 
@@ -270,7 +286,7 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
   end
   
   -- Originator b/c that's what the referer needs to be
-  local function queue_afc(params, originator, originatingCBI)
+  local queue_afc = function(params, originator, originatingCBI)
     local data = ''
     for k, v in pairs(params) do
       if data ~= '' then
@@ -279,7 +295,7 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
       data = data .. urlparse.escape(k) .. "=" .. urlparse.escape(tostring(v))
     end
     print_debug("Data is " .. data)
-    token7 = '6304e75ff709a523cb374c47258889e6'
+    token7 = '6304e75ff709a523cb374c47258889e6'  -- TODO get this a better way
     
     local cbi_component = "&callbackIndex=" .. tostring(callbackIndex)
     callbackOriginParmas[callbackIndex] = params
@@ -290,29 +306,45 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     callbackOriginatingPages[callbackIndex] = originator
     
     callbackIndex = callbackIndex + 1
-    table.insert(urls, {url="http://" .. current_item_value .. ".wikidot.com/ajax-module-connector.php", post_data=data .. cbi_component .. "&wikidot_token7=" .. token7, headers={Referer=originator}}) -- TODO suffix w/ the cookie (this is just what Firefox got, expires the 13th)
+    table.insert(urls, {url="http://" .. current_item_value .. "/ajax-module-connector.php",
+                        post_data=data .. cbi_component .. "&wikidot_token7=" .. token7,
+                        headers={Referer=originator,
+                                 Cookie="wikidot_token7=" .. token7}
+                       }
+                )
   end
 
   -- Start of wikis
-  if string.match(url, "^https?://[^%./]+%.wikidot%.com/$") and current_item_type == "wiki" and status_code == 200 then
+  if string.match(url, targeted_regex_prefix .. "/$") and current_item_type == "wiki" and status_code == 200 then
+    print_debug("Matched start")
     --table.insert(urls, {url="http://" .. current_item_value .. ".wikidot.com/ajax-module-connector.php", data="moduleName=misc%2FCookiePolicyPlModule&callbackIndex=0&wikidot_token7=d176d812712a8a6d4d09af58033153b5"}) -- Old version
     queue_afc({moduleName="misc/CookiePolicyPlModule"}, url) -- Not sure what this is actually for, but if it is not present every page gets a permanent "loading" cursor
-    check("http://" .. current_item_value .. ".wikidot.com/common--misc/blank.html") -- What it sounds like
+    check("http://" .. current_item_value .. "/common--misc/blank.html") -- What it sounds like
     
     -- Some common pages that list other pages
-    check("http://" .. current_item_value .. ".wikidot.com/system:list-all-pages")
-    check("http://" .. current_item_value .. ".wikidot.com/forum")
-    check("http://" .. current_item_value .. ".wikidot.com/forum:start")
-    check("http://" .. current_item_value .. ".wikidot.com/nav:side") -- See http://community.wikidot.com/help:menu
-    check("http://" .. current_item_value .. ".wikidot.com/nav:top") -- See http://community.wikidot.com/help:menu
+    check("http://" .. current_item_value .. "/system:list-all-pages")
+    check("http://" .. current_item_value .. "/forum")
+    check("http://" .. current_item_value .. "/forum:start")
+    check("http://" .. current_item_value .. "/nav:side") -- See http://community.wikidot.com/help:menu
+    check("http://" .. current_item_value .. "/nav:top") -- See http://community.wikidot.com/help:menu
+    check("http://" .. current_item_value .. "/sitemap.xml", true)
     -- TODO check page tags
     -- TODO recent changes
     
   end
   
+  if string.match(url, targeted_regex_prefix .. "/sitemap.*%.xml$") and current_item_type == "wiki" and status_code == 200 then -- Some sitemaps are indexes of other sitemaps (e.g. wiki:helao.wikidot.com) - this will get those
+    load_html()
+    for url in string.gmatch(html, "<loc>([^ \n][^ \n]-)</loc>") do
+      print_debug("Queueing " .. url .. " from sitemap")
+      check(url)
+    end
+    html = "" -- Stop junk from being extracted
+  end
+  
   -- Wiki pages
   if current_item_type == "wiki" and status_code == 200 then
-    if string.match(url, "^http://[^/]+%.wikidot%.com/ajax%-module%-connector%.php$") then
+    if string.match(url, targeted_regex_prefix .. "/ajax%-module%-connector%.php$") then
       load_html()
       local json = JSON:decode(html)
       if json["status"] == "ok" then
@@ -329,9 +361,21 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
             versions[vers] = true
           end
           
+          local num_versions = 0
           for vers, _ in pairs(versions) do
             queue_afc({moduleName="history/PageVersionModule", revision_id=vers}, nil, tonumber(json["callbackIndex"])) -- View this version rendered
             queue_afc({moduleName="history/PageSourceModule", revision_id=vers}, nil, tonumber(json["callbackIndex"])) -- View this version's source
+            num_versions = num_versions + 1
+          end
+          
+          -- Get next page
+          print_debug("There are " .. num_versions .. " versions")
+          if num_versions >= orig_q["perpage"] then
+            queue_afc({moduleName="history/PageRevisionListModule",
+                       page_id=orig_q["page_id"],
+                       page=tonumber(orig_q["page"]) + 1,
+                       perpage=orig_q["perpage"],
+                       options=orig_q["options"]}, nil, tonumber(json["callbackIndex"]))
           end
           
           
@@ -355,7 +399,7 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
       if page_id then
         queue_afc({moduleName="viewsource/ViewSourceModule", page_id=page_id}, url) -- View page source
         queue_afc({moduleName="history/PageHistoryModule", page_id=page_id}, url) -- Interface to view history
-        -- CDN http://d3g0gp89917ko0.cloudfront.net/v--3e3a6f7dbcc9/common--modules/js/history/PageHistoryModule.js TODO
+        -- CDN http://d3g0gp89917ko0.cloudfront.net/v--3e3a6f7dbcc9/common--modules/js/history/PageHistoryModule.js TODO get this somewhere for playback
         queue_afc({moduleName="history/PageRevisionListModule", page_id=page_id, page=1, perpage=20, options='{"all":true}'}, url) -- First page of history
       end
     end
@@ -368,12 +412,13 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
       discover_item("user", user)
     end
     
-    for newurl in string.gmatch(string.gsub(html, "&quot;", '"'), '([^"]+)') do
+    -- These two were extracting a lot of junk
+    --[[for newurl in string.gmatch(string.gsub(html, "&quot;", '"'), '([^"]+)') do
       checknewurl(newurl)
     end
     for newurl in string.gmatch(string.gsub(html, "&#039;", "'"), "([^']+)") do
       checknewurl(newurl)
-    end
+    end]]
     for newurl in string.gmatch(html, ">%s*([^<%s]+)") do
       checknewurl(newurl)
     end
@@ -425,7 +470,7 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
   local url_is_essential = true
 
   -- Whitelist instead of blacklist status codes
-  local is_valid_403 = string.match(url["url"], "^https?://[^/%.]+%.wikidot%.com/common%-%-")
+  local is_valid_403 = string.match(url["url"], targeted_regex_prefix .. "/common%-%-")
   if status_code ~= 200
     and is_on_targeted(url["url"])
     and not (status_code == 404) -- Because this site is editable, there are loads of weird 404s
