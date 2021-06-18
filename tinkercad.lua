@@ -75,6 +75,11 @@ end
 discover_item = function(item_type, item_name)
   assert(item_type)
   assert(item_name)
+  
+  if item_type == "wiki" and item_name == "www.wikidot.com" then
+    return
+  end
+  
   if not discovered_items[item_type .. ":" .. item_name] then
     print_debug("Queuing for discovery " .. item_type .. ":" .. item_name)
   end
@@ -152,35 +157,41 @@ allowed = function(url, parenturl)
     return false
   end
   
-  local user = string.match(url, "^https?://www%.wikidot%.com/user:info/(.*)")
-  if user then
-    discover_item("user", user)
-    return false
+  if current_item_type == "wiki" then
+    local user = string.match(url, "^https?://www%.wikidot%.com/user:info/(.*)")
+    if user then
+      discover_item("user", user)
+      return false
+    end
+    
+    local wiki = string.match(url, "^https?://([^%./]+%.wikidot%.com)/") or string.match(url, "^https?://([^%./]+%.wikidot%.com)$")
+    if wiki and wiki ~= current_item_value then
+      discover_item("wiki", wiki)
+      return false
+    end
+    
+    -- This is retrieved, but only through POST
+    -- This will also match relative URLs erroneously extracted from responses from this endpoint
+    if string.match(url, "/ajax%-module%-connector%.php") then
+      return false
+    end
+    
+    -- Misc stuff not useful in archive
+    if string.match(url, targeted_regex_prefix .. "/forum:new%-thread/")
+      or string.match(url, targeted_regex_prefix .. "/search:site/")
+      or string.match(url, targeted_regex_prefix .. "/admin:")
+      or string.match(url, targeted_regex_prefix .. "/feed/.*%.xml$") then
+      return false
+    end
   end
   
-  local wiki = string.match(url, "^https?://([^%./]+%.wikidot%.com)/") or string.match(url, "^https?://([^%./]+%.wikidot%.com)$")
-  if wiki and wiki ~= current_item_value then
-    discover_item("wiki", wiki)
-    return false
-  end
-  
-  -- THumbnails
+    -- THumbnails
   if string.match(url, "^https?://[^/]+%.wdfiles%.com/") then
     return true
   end
-
+  
   if not is_on_targeted(url) then
     --print("Discarding 3p site " .. url .. "; stop the project if you see this in production") -- TODO decide what do do with these
-    return false
-  end
-  
-  -- This is retrieved, but only through POST
-  -- This will also match relative URLs erroneously extracted from responses from this endpoint
-  if string.match(url, "/ajax%-module%-connector%.php") then
-    return false
-  end
-  
-  if string.match(url, targeted_regex_prefix .. "/forum:new%-thread/") then
     return false
   end
   
@@ -315,7 +326,8 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
   end
 
   -- Start of wikis
-  if string.match(url, targeted_regex_prefix .. "/$") and current_item_type == "wiki" and status_code == 200 then
+  -- Accept 200 or 301 because some wikis redirect themselves to their owners' new sites; chances are these are offline
+  if string.match(url, targeted_regex_prefix .. "/$") and current_item_type == "wiki" and (status_code == 200 or status_code == 301) then
     print_debug("Matched start")
     --table.insert(urls, {url="http://" .. current_item_value .. ".wikidot.com/ajax-module-connector.php", data="moduleName=misc%2FCookiePolicyPlModule&callbackIndex=0&wikidot_token7=d176d812712a8a6d4d09af58033153b5"}) -- Old version
     queue_afc({moduleName="misc/CookiePolicyPlModule"}, url) -- Not sure what this is actually for, but if it is not present every page gets a permanent "loading" cursor
@@ -323,12 +335,17 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     
     -- Some common pages that list other pages
     check("http://" .. current_item_value .. "/system:list-all-pages")
+    check("http://" .. current_item_value .. "/system:list-pages")
+    check("http://" .. current_item_value .. "/system:members")
     check("http://" .. current_item_value .. "/forum")
     check("http://" .. current_item_value .. "/forum:start")
     check("http://" .. current_item_value .. "/nav:side") -- See http://community.wikidot.com/help:menu
     check("http://" .. current_item_value .. "/nav:top") -- See http://community.wikidot.com/help:menu
     check("http://" .. current_item_value .. "/sitemap.xml", true)
-    -- TODO check page tags
+    
+    -- Page tags (turns out these are static pages)
+    check("http://" .. current_item_value .. "/system:page-tags-list")
+    check("http://" .. current_item_value .. "/system:page-tags")
     -- TODO recent changes
     
   end
@@ -447,7 +464,8 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
   if status_code >= 300 and status_code <= 399 then
     local newloc = urlparse.absolute(url["url"], http_stat["newloc"])
     if downloaded[newloc] == true or addedtolist[newloc] == true
-            or not allowed(newloc, url["url"]) then
+      or not allowed(newloc, url["url"])
+      or (current_item_type == "wiki" and string.match(url["url"], targeted_regex_prefix .. "/$")) then -- Do not follow any redirects from wiki homepages
       tries = 0
       return wget.actions.EXIT
     --[[else
