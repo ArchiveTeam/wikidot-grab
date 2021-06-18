@@ -215,6 +215,10 @@ class WgetArgs(object):
                 wget_args.extend(['--warc-header', 'wikidot-wiki: ' + item_value])
                 wget_args.append(f'http://{item_value}/')
                 set_start_url(item_type, item_value, f'http://{item_value}/')
+            elif item_type == 'user':
+                wget_args.extend(['--warc-header', 'wikidot-user: ' + item_value])
+                wget_args.append(f'http://www.wikidot.com/user:info/{item_value}')
+                set_start_url(item_type, item_value, f'http://www.wikidot.com/user:info/{item_value}')
             else:
                 raise ValueError('item_type not supported.')
 

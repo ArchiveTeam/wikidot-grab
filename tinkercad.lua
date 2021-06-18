@@ -31,6 +31,8 @@ local callbackOriginatingPages = {}
 
 local targeted_regex_prefix = nil
 
+local user_popup_pages_already_queued = {}
+
 io.stdout:setvbuf("no") -- So prints are not buffered - http://lua.2524044.n2.nabble.com/print-stdout-and-flush-td6406981.html
 
 if urlparse == nil or http == nil then
@@ -65,7 +67,7 @@ set_new_item = function(url)
       print_debug("TRP is " .. targeted_regex_prefix)
       assert(not string.match(current_item_value, "[^a-z0-9%-%_%.]"))
     else
-      targeted_regex_prefix = nil -- TODO for users
+      targeted_regex_prefix = nil -- Correct for users
     end
   end
   assert(current_item_type)
@@ -97,9 +99,10 @@ add_ignore = function(url)
   end
   add_ignore(string.gsub(url, "^https", "http", 1))
   add_ignore(string.gsub(url, "^http:", "https:", 1))
-  local nothing_after_domain = string.match(url, "^([^%?#]+[^/])$")
-  if nothing_after_domain then
-    add_ignore(nothing_after_domain .. "/")
+  add_ignore(string.match(url, "^ +([^ ]+)"))
+  local protocol_and_domain_and_port = string.match(url, "^([a-zA-Z0-9]+://[^/]+)")
+  if protocol_and_domain_and_port then
+    add_ignore(protocol_and_domain_and_port .. "/")
   end
   add_ignore(string.match(url, "^(.+)/$"))
 end
@@ -120,7 +123,22 @@ read_file = function(file)
 end
 
 is_on_targeted = function(url)
-  return string.match(url, targeted_regex_prefix .. "/") or string.match(url, targeted_regex_prefix .. "$")
+  -- THumbnails
+  if string.match(url, "^https?://[^/]+%.wdfiles%.com/") then
+    return true
+  end
+
+  if current_item_type == "wiki" then
+    return string.match(url, targeted_regex_prefix .. "/") or string.match(url, targeted_regex_prefix .. "$")
+  elseif current_item_type == "user" then
+    return url == "http://www.wikidot.com/user:info/" .. current_item_value
+          or string.match(url, "^https?://[^/%.#]%.wikidot%.com/ajax%-module%-connector%.php$")
+          or string.match(url, "^https?://d2qhngyckgiutd%.cloudfront%.net/") -- Thumbnails
+          or string.match(url, "^http://[^/]+%.wikidot%.com/userkarma%.php")
+          or string.match(url, "^http://[^/]+%.wikidot%.com/avatar%.php")
+  else
+    error("You need to implement is_on_targeted for this item type")
+  end
 end
 
 allowed = function(url, parenturl)
@@ -185,13 +203,18 @@ allowed = function(url, parenturl)
     end
   end
   
-    -- THumbnails
-  if string.match(url, "^https?://[^/]+%.wdfiles%.com/") then
+  -- Get avatars themselves, since they have a timestamp in them
+  if string.match(url, "^http://[^/]+%.wikidot%.com/avatar%.php") then
+    return true
+  end
+  
+  -- Get redirects from avatars, for gravatar etc. (if possible)
+  if string.match(parenturl, "^http://[^/]+%.wikidot%.com/avatar%.php") then
     return true
   end
   
   if not is_on_targeted(url) then
-    --print("Discarding 3p site " .. url .. "; stop the project if you see this in production") -- TODO decide what do do with these
+    print("Discarding 3p site " .. url .. "; stop the project if you see this in production") -- TODO decide what do do with these
     return false
   end
   
@@ -297,7 +320,7 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
   end
   
   -- Originator b/c that's what the referer needs to be
-  local queue_afc = function(params, originator, originatingCBI)
+  local queue_afc = function(params, originator, originatingCBI, domain)
     local data = ''
     for k, v in pairs(params) do
       if data ~= '' then
@@ -317,7 +340,16 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     callbackOriginatingPages[callbackIndex] = originator
     
     callbackIndex = callbackIndex + 1
-    table.insert(urls, {url="http://" .. current_item_value .. "/ajax-module-connector.php",
+    
+    if not domain then
+      if current_item_type == "wiki" then
+        domain = current_item_value
+      else
+        domain = urlparse.parse(originator).authority
+      end
+    end
+    
+    table.insert(urls, {url="http://" .. domain .. "/ajax-module-connector.php",
                         post_data=data .. cbi_component .. "&wikidot_token7=" .. token7,
                         headers={Referer=originator,
                                  Cookie="wikidot_token7=" .. token7}
@@ -327,7 +359,7 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
 
   -- Start of wikis
   -- Accept 200 or 301 because some wikis redirect themselves to their owners' new sites; chances are these are offline
-  if string.match(url, targeted_regex_prefix .. "/$") and current_item_type == "wiki" and (status_code == 200 or status_code == 301) then
+  if current_item_type == "wiki" and string.match(url, targeted_regex_prefix .. "/$") and (status_code == 200 or status_code == 301) then
     print_debug("Matched start")
     --table.insert(urls, {url="http://" .. current_item_value .. ".wikidot.com/ajax-module-connector.php", data="moduleName=misc%2FCookiePolicyPlModule&callbackIndex=0&wikidot_token7=d176d812712a8a6d4d09af58033153b5"}) -- Old version
     queue_afc({moduleName="misc/CookiePolicyPlModule"}, url) -- Not sure what this is actually for, but if it is not present every page gets a permanent "loading" cursor
@@ -346,11 +378,9 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     -- Page tags (turns out these are static pages)
     check("http://" .. current_item_value .. "/system:page-tags-list")
     check("http://" .. current_item_value .. "/system:page-tags")
-    -- TODO recent changes
-    
   end
   
-  if string.match(url, targeted_regex_prefix .. "/sitemap.*%.xml$") and current_item_type == "wiki" and status_code == 200 then -- Some sitemaps are indexes of other sitemaps (e.g. wiki:helao.wikidot.com) - this will get those
+  if current_item_type == "wiki" and string.match(url, targeted_regex_prefix .. "/sitemap.*%.xml$") and status_code == 200 then -- Some sitemaps are indexes of other sitemaps (e.g. wiki:helao.wikidot.com) - this will get those
     load_html()
     for url in string.gmatch(html, "<loc>([^ \n][^ \n]-)</loc>") do
       print_debug("Queueing " .. url .. " from sitemap")
@@ -358,6 +388,15 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     end
     html = "" -- Stop junk from being extracted
   end
+  
+  if current_item_type == "wiki" then
+    local file_name = string.match(url, targeted_regex_prefix .. "/local%-%-resized%-images/(.+)/thumbnail%.jpg$")
+    if file_name then
+      check("http://" .. current_item_value .. "/local--files/" .. file_name)
+    end
+  end
+  
+  
   
   -- Wiki pages
   if current_item_type == "wiki" and status_code == 200 then
@@ -403,9 +442,11 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
         end
       elseif json["status"] == "no_permission" then
         print("A-M-C status is no_permission, skipping")
+      elseif json["message"] == "This Site is private and accessible only to its members." then
+        print("A-M-C message says private site, skipping")
       else
         -- The following is here for debugging purposes
-        print("Bad A-M-C status, details follow")
+        print("Bad A-M-C status, details follow.")
         print(JSON:encode(json))
         print(JSON:encode(callbackOriginParmas[tonumber(json["callbackIndex"])])) -- If it fails to find, it will do the same thing as the next line anyhow
         error("Bad A-M-C status")
@@ -413,7 +454,8 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     else
       load_html()
       local page_id = string.match(html, "WIKIREQUEST%.info%.pageId = ([0-9]+);")
-      if page_id then
+      if page_id
+      and not (string.match(url, targeted_regex_prefix .. "/system:") or string.match(url, targeted_regex_prefix .. "/sitemap.*%.xml$") or string.match(url, targeted_regex_prefix .. "/forum:")) then
         queue_afc({moduleName="viewsource/ViewSourceModule", page_id=page_id}, url) -- View page source
         queue_afc({moduleName="history/PageHistoryModule", page_id=page_id}, url) -- Interface to view history
         -- CDN http://d3g0gp89917ko0.cloudfront.net/v--3e3a6f7dbcc9/common--modules/js/history/PageHistoryModule.js TODO get this somewhere for playback
@@ -421,6 +463,48 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
       end
     end
   end
+  
+  --------------------------------------------------
+  --- User
+    -- user todo
+  -- TODO user ajax popup page (users/UserInfoWinModule)
+  -- TODO user avatars w/ timestamp (in above)
+  -- TODO http://d3g0gp89917ko0.cloudfront.net/v--3e3a6f7dbcc9/common--modules/js/users/UserInfoWinModule.js
+  -- TODO http://d3g0gp89917ko0.cloudfront.net/v--3e3a6f7dbcc9/common--modules/js/userinfo/UserChangesModule.js
+  -- TODO http://d3g0gp89917ko0.cloudfront.net/v--3e3a6f7dbcc9/common--modules/js/userinfo/UserRecentPostsModule.js
+  -- TODO http://www.wikidot.com/userkarma.php?u=3370&onlyKarma=true
+  if current_item_type == "user" and url == "http://www.wikidot.com/user:info/" .. current_item_value then
+    queue_afc({moduleName="misc/CookiePolicyPlModule"}, url)
+    load_html()
+    local user_id = string.match(html, "USERINFO%.userId = ([0-9]+)")
+    assert(user_id)
+    queue_afc({moduleName="userinfo/UserInfoMemberOfModule", user_id=user_id}, url)
+    queue_afc({moduleName="userinfo/UserInfoModeratorOfModule", user_id=user_id}, url)
+    queue_afc({moduleName="userinfo/UserInfoAdminOfModule", user_id=user_id}, url)
+    queue_afc({moduleName="userinfo/UserChangesModule", user_id=user_id}, url)
+    queue_afc({moduleName="userinfo/UserRecentPostsModule", user_id=user_id}, url)
+    user_popup_pages_already_queued[user_id] = {}
+  end
+  
+  if current_item_type == "user" and string.match(url, "/ajax%-module%-connector%.php$") then
+    load_html()
+    local json = JSON:decode(html)
+    local orig_q = callbackOriginParmas[tonumber(json["callbackIndex"])]
+    
+    if orig_q["moduleName"] ~= "misc/CookiePolicyPlModule" and orig_q["moduleName"] ~= "userinfo/UserRecentPostsModule" then
+      assert(json["status"] == "ok")
+      user_id = orig_q["user_id"]
+      for wiki in string.gmatch(json["body"], "https?://([a-z0-9%-%_%.]+)") do
+        discover_item("wiki", wiki)
+        if not user_popup_pages_already_queued[user_id][wiki] then
+          user_popup_pages_already_queued[user_id][wiki] = true
+          queue_afc({moduleName="userinfo/UserRecentPostsModule", user_id=user_id}, nil, tonumber(json["callbackIndex"]), wiki)
+        end
+      end
+    end
+  end
+  
+  
 
   if status_code == 200 and not (string.match(url, "%.jpe?g$") or string.match(url, "%.png$")) then
     load_html()
@@ -488,7 +572,7 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
   local url_is_essential = true
 
   -- Whitelist instead of blacklist status codes
-  local is_valid_403 = string.match(url["url"], targeted_regex_prefix .. "/common%-%-")
+  local is_valid_403 = current_item_type == "wiki" and string.match(url["url"], targeted_regex_prefix .. "/common%-%-")
   if status_code ~= 200
     and is_on_targeted(url["url"])
     and not (status_code == 404) -- Because this site is editable, there are loads of weird 404s
