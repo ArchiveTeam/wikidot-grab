@@ -380,6 +380,22 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     check("http://" .. current_item_value .. "/system:page-tags")
   end
   
+  
+  -- Most redirects (e.g. on wiki:cpp-wiki.wikidot.com)
+  if current_item_type == "wiki"
+    and string.match(url, targeted_regex_prefix .. "/")
+    and status_code == 301
+    and not string.match(url, targeted_regex_prefix .. "/.*/norender/true$")then
+    print_debug("Check called")
+    check(url .. "/noredirect/true") -- https://www.wikidot.com/doc-modules:redirect-module
+  end
+  
+  -- If even that doesn't work, per http://community.wikidot.com/forum/t-13982350/noredirect-true-link-not-working
+  if current_item_type == "wiki" and string.match(url, targeted_regex_prefix .. "/.*/noredirect/true$") and status_code == 301 then
+    print_debug("Trying norender")
+    check((string.gsub(url, "/noredirect/true$", "/norender/true")))
+  end
+  
   if current_item_type == "wiki" and string.match(url, targeted_regex_prefix .. "/sitemap.*%.xml$") and status_code == 200 then -- Some sitemaps are indexes of other sitemaps (e.g. wiki:helao.wikidot.com) - this will get those
     load_html()
     for url in string.gmatch(html, "<loc>([^ \n][^ \n]-)</loc>") do
@@ -417,11 +433,19 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
             versions[vers] = true
           end
           
+          
+          
           local num_versions = 0
+          -- Lua is an awful language
           for vers, _ in pairs(versions) do
-            queue_afc({moduleName="history/PageVersionModule", revision_id=vers}, nil, tonumber(json["callbackIndex"])) -- View this version rendered
-            queue_afc({moduleName="history/PageSourceModule", revision_id=vers}, nil, tonumber(json["callbackIndex"])) -- View this version's source
             num_versions = num_versions + 1
+          end
+          
+          if num_versions > 1 then
+            for vers, _ in pairs(versions) do
+              queue_afc({moduleName="history/PageVersionModule", revision_id=vers}, nil, tonumber(json["callbackIndex"])) -- View this version rendered
+              queue_afc({moduleName="history/PageSourceModule", revision_id=vers}, nil, tonumber(json["callbackIndex"])) -- View this version's source
+            end
           end
           
           -- Get next page
@@ -549,7 +573,7 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
     local newloc = urlparse.absolute(url["url"], http_stat["newloc"])
     if downloaded[newloc] == true or addedtolist[newloc] == true
       or not allowed(newloc, url["url"])
-      or (current_item_type == "wiki" and string.match(url["url"], targeted_regex_prefix .. "/$")) then -- Do not follow any redirects from wiki homepages
+      or (current_item_type == "wiki" and string.match(url["url"], targeted_regex_prefix .. "/$")) then
       tries = 0
       return wget.actions.EXIT
     --[[else
@@ -584,6 +608,11 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
 
   if not is_on_targeted(url["url"]) then
     maxtries = 2
+  end
+  
+  -- revision_id=26219190&moduleName=history%2fPageVersionModule&callbackIndex=374&wikidot_token7=[token] 500s (checked 1 day delay) on wiki:cpp-wiki.wikidot.com if you make it get all versions
+  if string.match(url["url"], "ajax%-module%-connector%.php$") and status_code == 500 then
+    url_is_essential = false
   end
 
 
