@@ -154,7 +154,7 @@ class MaybeSendDoneToTracker(SendDoneToTracker):
 
 CWD = os.getcwd()
 PIPELINE_SHA1 = get_hash(os.path.join(CWD, 'pipeline.py'))
-LUA_SHA1 = get_hash(os.path.join(CWD, 'tinkercad.lua'))
+LUA_SHA1 = get_hash(os.path.join(CWD, 'wikidot.lua'))
 
 def stats_id_function(item):
     d = {
@@ -174,7 +174,7 @@ class WgetArgs(object):
             '-nv',
             '--content-on-error',
             '--load-cookies', 'cookies.txt',
-            '--lua-script', 'tinkercad.lua',
+            '--lua-script', 'wikidot.lua',
             '-o', ItemInterpolation('%(item_dir)s/wget.log'),
             '--no-check-certificate',
             '--output-document', ItemInterpolation('%(item_dir)s/wget.tmp'),
@@ -243,10 +243,10 @@ class WgetArgs(object):
 # This will be shown in the warrior management panel. The logo should not
 # be too big. The deadline is optional.
 project = Project(
-    title = 'tinkercad',
+    title = 'wikidot',
     project_html = '''
     <img class="project-logo" alt="logo" src="https://wiki.archiveteam.org/images/6/66/Tinkercad_icon.png" height="50px"/>
-    <h2>Tinkercad <span class="links"><a href="https://www.tinkercad.com/">Website</a> &middot; <a href="http://tracker.archiveteam.org/tinkercad/">Leaderboard</a></span></h2>
+    <h2>Wikidot <span class="links"><a href="https://www.wikidot.com/">Website</a> &middot; <a href="http://tracker.archiveteam.org/wikidot/">Leaderboard</a></span></h2>
     ''',)
 
 pipeline = Pipeline(
@@ -254,7 +254,7 @@ pipeline = Pipeline(
     GetItemFromTracker('http://{}/{}/multi={}/'
         .format(TRACKER_HOST, TRACKER_ID, MULTI_ITEM_SIZE),
         downloader, VERSION),
-    PrepareDirectories(warc_prefix='tinkercad'),
+    PrepareDirectories(warc_prefix='wikidot'),
     WgetDownload(
         WgetArgs(),
         max_tries=1,
