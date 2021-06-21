@@ -33,6 +33,8 @@ local targeted_regex_prefix = nil
 
 local user_popup_pages_already_queued = {}
 
+local to_queue_to_urls = {}
+
 io.stdout:setvbuf("no") -- So prints are not buffered - http://lua.2524044.n2.nabble.com/print-stdout-and-flush-td6406981.html
 
 if urlparse == nil or http == nil then
@@ -214,7 +216,7 @@ allowed = function(url, parenturl)
   end
   
   if not is_on_targeted(url) then
-    print("Discarding 3p site " .. url .. "; stop the project if you see this in production") -- TODO decide what do do with these
+   to_queue_to_urls[url] = true
     return false
   end
   
@@ -644,14 +646,14 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
 end
 
 
-wget.callbacks.finish = function(start_time, end_time, wall_time, numurls, total_downloaded_bytes, total_download_time)
+queue_list_to = function(list, endpoint)
   if do_debug then
-    for item, _ in pairs(discovered_items) do
+    for item, _ in pairs(list) do
       print("Would have sent discovered item " .. item)
     end
   else
     local to_send = nil
-    for item, _ in pairs(discovered_items) do
+    for item, _ in pairs(list) do
       assert(string.match(item, ":")) -- Message from EggplantN, #binnedtray (search "colon"?)
       if to_send == nil then
         to_send = item
@@ -665,14 +667,14 @@ wget.callbacks.finish = function(start_time, end_time, wall_time, numurls, total
       local tries = 0
       while tries < 10 do
         local body, code, headers, status = http.request(
-          --"http://blackbird.arpa.li:23038/tinkercad-n9szj9md96micct/",
-          "http://example.com/",
+          endpoint,
           to_send
         )
         if code == 200 or code == 409 then
           break
         end
         os.execute("sleep " .. math.floor(math.pow(2, tries)))
+        print("Sleeping on queue to " .. endpoint)
         tries = tries + 1
       end
       if tries == 10 then
@@ -680,6 +682,12 @@ wget.callbacks.finish = function(start_time, end_time, wall_time, numurls, total
       end
     end
   end
+end
+
+
+wget.callbacks.finish = function(start_time, end_time, wall_time, numurls, total_downloaded_bytes, total_download_time)
+  queue_list_to(discovered_items, "http://example.com")
+  queue_list_to(to_queue_to_urls, "http://example.com")
 end
 
 wget.callbacks.write_to_warc = function(url, http_stat)
