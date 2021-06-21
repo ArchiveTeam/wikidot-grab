@@ -43,7 +43,7 @@ if urlparse == nil or http == nil then
   abortgrab = true
 end
 
-do_debug = true
+do_debug = false
 print_debug = function(a)
   if do_debug then
     print(a)
@@ -423,7 +423,7 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
       local json = JSON:decode(html)
       if json["status"] == "ok" then
         local orig_q = callbackOriginParmas[tonumber(json["callbackIndex"])]
-        print("Orig module was " .. orig_q["moduleName"])
+        print_debug("Orig module was " .. orig_q["moduleName"])
         
         -- History page
         if orig_q["moduleName"] == "history/PageRevisionListModule" then
