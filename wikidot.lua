@@ -387,7 +387,8 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
   if current_item_type == "wiki"
     and string.match(url, targeted_regex_prefix .. "/")
     and status_code == 301
-    and not string.match(url, targeted_regex_prefix .. "/.*/norender/true$")then
+    and not string.match(url, targeted_regex_prefix .. "/.*/norender/true$")
+    and not string.match(url, targeted_regex_prefix .. "/.*/noredirect/true$") then
     print_debug("Check called")
     check(url .. "/noredirect/true") -- https://www.wikidot.com/doc-modules:redirect-module
   end
