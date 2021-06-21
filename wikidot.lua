@@ -200,7 +200,8 @@ allowed = function(url, parenturl)
     if string.match(url, targeted_regex_prefix .. "/forum:new%-thread/")
       or string.match(url, targeted_regex_prefix .. "/search:site/")
       or string.match(url, targeted_regex_prefix .. "/admin:")
-      or string.match(url, targeted_regex_prefix .. "/feed/.*%.xml$") then
+      or string.match(url, targeted_regex_prefix .. "/feed/.*%.xml$")
+      or string.match(url, targeted_regex_prefix .. ".+/edit/true$") then
       return false
     end
   end
